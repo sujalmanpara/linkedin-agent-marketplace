@@ -1,0 +1,31 @@
+{
+  "id": "linkedin-agent",
+  "name": "LinkedIn Automation Agent",
+  "description": "Send personalized LinkedIn connection requests and messages using AI. Supports Anthropic, OpenAI, and Google Gemini.",
+  "version": "2.0.0",
+  "author": "Sam (@sujalmanpara)",
+  "category": "automation",
+  "tags": ["linkedin", "outreach", "automation", "ai-personalization", "networking"],
+  "requiredEnv": [
+    "LLM_API_KEY"
+  ],
+  "optionalEnv": [
+    "LINKEDIN_SESSION_COOKIE",
+    "LINKEDIN_EMAIL",
+    "LINKEDIN_PASSWORD",
+    "LLM_PROVIDER",
+    "LLM_MODEL"
+  ],
+  "trigger": [
+    "linkedin",
+    "send connection",
+    "connect on linkedin",
+    "linkedin message",
+    "reach out on linkedin",
+    "connect with"
+  ],
+  "timeout": 120,
+  "maxConcurrency": 2,
+  "supportsHumanInLoop": false,
+  "enabled": true
+}
