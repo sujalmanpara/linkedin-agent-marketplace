@@ -1,6 +1,6 @@
 """
-LinkedIn Agent - Executor
-Sends personalized LinkedIn connection requests and messages using AI.
+LinkedIn Agent - Marketplace Coordinator
+Generates personalized messages and provides automation commands for OpenClaw to execute locally.
 """
 import httpx
 import re
@@ -8,77 +8,55 @@ from app.core.sse import sse_event, sse_error
 from app.core.config import settings
 
 # Import agent-specific modules
-from .linkedin_service import send_connection_request, send_message
 from .llm_service import generate_personalized_note
 
 
 async def execute(prompt: str, keys: dict, language: str = None, options: dict = None):
     """
-    Main executor for LinkedIn agent.
+    LinkedIn Agent - Coordinator/Brain
+    
+    Generates personalized AI messages and provides structured commands for OpenClaw to execute.
+    OpenClaw will handle the actual browser automation locally using the user's logged-in browser.
     
     Args:
         prompt: User's request (e.g., "Send connection to https://linkedin.com/in/john-smith")
         keys: {
-            "LINKEDIN_SESSION_COOKIE": "AQEDATg...",  # Primary auth method (recommended)
-            "LINKEDIN_EMAIL": "user@example.com",     # Fallback (may hit security checkpoint)
-            "LINKEDIN_PASSWORD": "password",          # Fallback
-            "LLM_API_KEY": "sk-...",
-            "LLM_PROVIDER": "google",  # optional: anthropic/openai/google
-            "LLM_MODEL": "gemini-2.5-flash"  # optional
+            "LLM_API_KEY": "sk-...",           # Required for AI personalization
+            "LLM_PROVIDER": "google",          # Optional: anthropic/openai/google (default: google)
+            "LLM_MODEL": "gemini-2.0-flash-exp" # Optional
         }
         language: "en", "es", etc.
         options: {
-            "action": "connect" or "message",  # default: connect
-            "personalize": true/false,         # default: true
-            "full_name": "John Smith",         # optional
-            "title": "CEO at TechCorp",        # optional
-            "company": "TechCorp",             # optional
-            "message_text": "..."              # for message action
+            "action": "connect" or "message",  # Default: connect
+            "personalize": true/false,         # Default: true
+            "full_name": "John Smith",         # Optional
+            "title": "CEO at TechCorp",        # Optional
+            "company": "TechCorp",             # Optional
+            "message_text": "..."              # For message action or custom note
         }
     
     Yields:
-        SSE events with status updates and final result
+        SSE events with:
+        - status: Progress updates
+        - result: Final command for OpenClaw to execute {
+            "action": "connect" | "message",
+            "linkedin_url": "...",
+            "personalized_note": "..." (if applicable),
+            "openclaw_command": {
+              "type": "linkedin_automation",
+              "action": "connect" | "message",
+              "profile_url": "...",
+              "message": "..."
+            }
+          }
     """
     try:
-        # Extract credentials (prioritize session cookie)
-        linkedin_session_cookie = keys.get("LINKEDIN_SESSION_COOKIE")
-        linkedin_email = keys.get("LINKEDIN_EMAIL")
-        linkedin_password = keys.get("LINKEDIN_PASSWORD")
+        # Extract LLM credentials
         llm_api_key = keys.get("LLM_API_KEY")
         
-        # Check if we have either cookie OR email+password
-        has_cookie = bool(linkedin_session_cookie)
-        has_password = bool(linkedin_email and linkedin_password)
-        
-        if not has_cookie and not has_password:
-            yield sse_error(
-                "LinkedIn authentication missing. Provide either:\n"
-                "1. LINKEDIN_SESSION_COOKIE (recommended - no security checkpoints)\n"
-                "2. LINKEDIN_EMAIL + LINKEDIN_PASSWORD (may trigger security verification)"
-            )
-            return
-        
         if not llm_api_key:
-            yield sse_error("LLM API key missing (LLM_API_KEY)")
+            yield sse_error("LLM_API_KEY required for AI personalization")
             return
-        
-        # Determine auth method
-        auth_method = "cookie" if has_cookie else "password"
-        if auth_method == "password":
-            yield sse_event("status", "⚠️ Using password auth - may encounter security checkpoint. Consider using session cookie instead.")
-        
-        # Package credentials
-        linkedin_creds = {
-            "method": auth_method,
-            "session_cookie": linkedin_session_cookie,
-            "email": linkedin_email,
-            "password": linkedin_password
-        }
-        
-        # Extract options
-        opts = options or {}
-        action = opts.get("action", "connect")
-        personalize = opts.get("personalize", True)
         
         # LLM config
         llm_provider = keys.get("LLM_PROVIDER", "google").lower()
@@ -89,6 +67,11 @@ async def execute(prompt: str, keys: dict, language: str = None, options: dict =
             "model": llm_model,
             "api_key": llm_api_key
         }
+        
+        # Extract options
+        opts = options or {}
+        action = opts.get("action", "connect")
+        personalize = opts.get("personalize", True)
         
         # Extract LinkedIn profile URL from prompt
         linkedin_url = _extract_linkedin_url(prompt)
@@ -103,12 +86,12 @@ async def execute(prompt: str, keys: dict, language: str = None, options: dict =
         title = opts.get("title", "")
         company = opts.get("company", "")
         
-        async with httpx.AsyncClient(timeout=90) as client:
-            # Action: Send connection request
+        async with httpx.AsyncClient(timeout=30) as client:
+            # Generate personalized message/note
             if action == "connect":
-                yield sse_event("status", "🤖 Generating personalized connection note...")
-                
                 if personalize:
+                    yield sse_event("status", "🤖 Generating personalized connection note...")
+                    
                     note = await generate_personalized_note(
                         client,
                         llm_config,
@@ -116,43 +99,41 @@ async def execute(prompt: str, keys: dict, language: str = None, options: dict =
                             "full_name": full_name,
                             "title": title,
                             "company": company,
-                            "linkedin_url": linkedin_url
+                            "linkedin_url": linkedin_url,
+                            "base_message": opts.get("message_text")
                         }
                     )
-                    yield sse_event("status", f"✅ Generated note: \"{note[:50]}...\"")
+                    
+                    yield sse_event("status", f"✅ Generated: \"{note[:60]}...\"")
                 else:
-                    note = None
+                    note = opts.get("message_text", None)
                 
-                yield sse_event("status", "📤 Sending LinkedIn connection request...")
-                
-                result = await send_connection_request(
-                    client,
-                    linkedin_creds,
-                    linkedin_url,
-                    note
-                )
-                
-                if result["success"]:
-                    yield sse_event("result", {
-                        "success": True,
+                # Return command for OpenClaw to execute
+                yield sse_event("result", {
+                    "success": True,
+                    "action": "connect",
+                    "linkedin_url": linkedin_url,
+                    "personalized_note": note,
+                    "openclaw_command": {
+                        "type": "linkedin_automation",
                         "action": "connect",
-                        "linkedin_url": linkedin_url,
-                        "personalized_note": note,
-                        "message": f"✅ Connection request sent to {full_name or linkedin_url}"
-                    })
-                else:
-                    yield sse_error(f"Failed to send connection: {result.get('error', 'Unknown error')}")
+                        "profile_url": linkedin_url,
+                        "note": note,
+                        "full_name": full_name
+                    },
+                    "message": f"✅ Ready to send connection request{' with personalized note' if note else ''}"
+                })
             
-            # Action: Send message
             elif action == "message":
                 message_text = opts.get("message_text")
                 
                 if not message_text:
-                    yield sse_error("Message text required for 'message' action (provide in options.message_text)")
+                    yield sse_error("message_text required for 'message' action")
                     return
                 
                 if personalize:
                     yield sse_event("status", "🤖 Personalizing message with AI...")
+                    
                     message_text = await generate_personalized_note(
                         client,
                         llm_config,
@@ -164,26 +145,24 @@ async def execute(prompt: str, keys: dict, language: str = None, options: dict =
                             "base_message": message_text
                         }
                     )
+                    
+                    yield sse_event("status", f"✅ Personalized: \"{message_text[:60]}...\"")
                 
-                yield sse_event("status", "📤 Sending LinkedIn message...")
-                
-                result = await send_message(
-                    client,
-                    linkedin_creds,
-                    linkedin_url,
-                    message_text
-                )
-                
-                if result["success"]:
-                    yield sse_event("result", {
-                        "success": True,
+                # Return command for OpenClaw to execute
+                yield sse_event("result", {
+                    "success": True,
+                    "action": "message",
+                    "linkedin_url": linkedin_url,
+                    "message": message_text,
+                    "openclaw_command": {
+                        "type": "linkedin_automation",
                         "action": "message",
-                        "linkedin_url": linkedin_url,
+                        "profile_url": linkedin_url,
                         "message": message_text,
-                        "status": f"✅ Message sent to {full_name or linkedin_url}"
-                    })
-                else:
-                    yield sse_error(f"Failed to send message: {result.get('error', 'Unknown error')}")
+                        "full_name": full_name
+                    },
+                    "status": f"✅ Ready to send message"
+                })
             
             else:
                 yield sse_error(f"Unknown action: {action}. Use 'connect' or 'message'")

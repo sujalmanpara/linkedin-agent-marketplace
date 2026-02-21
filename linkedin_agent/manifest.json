@@ -1,18 +1,15 @@
 {
   "id": "linkedin-agent",
   "name": "LinkedIn Automation Agent",
-  "description": "Send personalized LinkedIn connection requests and messages using AI. Supports Anthropic, OpenAI, and Google Gemini.",
-  "version": "2.0.0",
+  "description": "Generate personalized LinkedIn connection notes and messages using AI. Works with OpenClaw browser control for seamless automation.",
+  "version": "3.0.0",
   "author": "Sam (@sujalmanpara)",
   "category": "automation",
-  "tags": ["linkedin", "outreach", "automation", "ai-personalization", "networking"],
+  "tags": ["linkedin", "outreach", "automation", "ai-personalization", "networking", "openclaw"],
   "requiredEnv": [
     "LLM_API_KEY"
   ],
   "optionalEnv": [
-    "LINKEDIN_SESSION_COOKIE",
-    "LINKEDIN_EMAIL",
-    "LINKEDIN_PASSWORD",
     "LLM_PROVIDER",
     "LLM_MODEL"
   ],
@@ -24,8 +21,8 @@
     "reach out on linkedin",
     "connect with"
   ],
-  "timeout": 120,
-  "maxConcurrency": 2,
+  "timeout": 60,
+  "maxConcurrency": 5,
   "supportsHumanInLoop": false,
   "enabled": true
 }
